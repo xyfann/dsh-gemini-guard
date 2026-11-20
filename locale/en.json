@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Model egress guard",
+    "description": "A fail-closed egress gate for vendor model routes that judge the caller by public IP (Gemini, OpenAI, Anthropic, xAI): the exit identity is vetted before any request leaves, IP flapping and region, auth, rate-limit or quota rejections get separate handling, and client fingerprints plus prompt-side environment facts stay consistent.",
+    "detail": "docs/DETAIL.md"
+  }
+}

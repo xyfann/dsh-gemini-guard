@@ -1,0 +1,68 @@
+{
+  "name": "dsh-gemini-guard",
+  "version": "0.3.0-beta.1",
+  "description": "Fail-closed egress gate, pre-flight risk assessment, and circuit breaker for vendor model routes that judge the caller by public IP (Gemini, OpenAI, Anthropic, xAI).",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "config.js",
+    "schema.js",
+    "guard.js",
+    "relay.js",
+    "hooks.js",
+    "risk.js",
+    "transport.js",
+    "panel.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "docs",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": ">=3.18.4 <4"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "gemini",
+    "openai",
+    "anthropic",
+    "xai",
+    "egress",
+    "proxy",
+    "circuit-breaker"
+  ],
+  "author": "xyfann",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xyfann/dsh-gemini-guard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xyfann/dsh-gemini-guard/issues"
+  },
+  "homepage": "https://github.com/xyfann/dsh-gemini-guard#readme"
+}

@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "模型出口闸门",
+    "description": "给按来源 IP 判断地区的大模型路由（Gemini / OpenAI / Anthropic / xAI）加一层失败即拒的出口闸门：出口身份先体检再放行，IP 跳动、地区被拒、鉴权失败、限流配额分别处理，并统一客户端指纹与提示词里的环境信息。",
+    "detail": "docs/DETAIL.md"
+  }
+}

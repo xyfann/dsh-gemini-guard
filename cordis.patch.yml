@@ -1,0 +1,39 @@
+# dsh-gemini-guard bundle patch.
+#
+# One Host row and four vendor targets. It never patches `llm-pi-ai` itself: the
+# profile's own patch layer is applied after bundle layers and replaces a row's
+# `config` wholesale, so the guarded provider routes are written at activation
+# time through the profile config editor instead (see docs/DETAIL.md).
+- insert:
+    - id: gemini-guard
+      name: dsh-gemini-guard
+      config:
+        enabled: true
+        listenHost: 127.0.0.1
+        listenPort: 8799
+        egress:
+          proxy: ''
+          allowedCountries:
+            - TW
+          # Pre-flight risk rules. 'warn' records and admits, 'block' refuses.
+          requireStableExit: true
+          stabilityWindowMs: 3600000
+          maxDistinctExitIps: 2
+          rejectHosting: warn
+          rejectProxyFlag: warn
+          timeZoneConsistency: warn
+          confirmations: 1
+        environment:
+          region: TW
+          timeZone: Asia/Taipei
+          locale: en-US
+          device: Windows 11 (x64)
+        targets:
+          gemini:
+            enabled: true
+          openai:
+            enabled: false
+          anthropic:
+            enabled: false
+          grok:
+            enabled: false
