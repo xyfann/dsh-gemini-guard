@@ -294,11 +294,14 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
       return
     }
     if (pathPart === '/_gemini-guard/recheck') {
+      // "Check the exit again" must also release latches a fix could have cured
+      // (a re-pasted key, a switched node); hard stops stay latched.
+      const released = typeof guard.releaseSoftBreakers === 'function' ? guard.releaseSoftBreakers() : []
       const ids = targetId ? [targetId] : relayTargets().map((target) => target.id)
       const results = {}
       for (const id of ids) results[id] = await guard.probe(id, { force: true })
       const ok = Object.values(results).every((result) => result.ok)
-      writeJson(res, ok ? 200 : 503, { ok, results })
+      writeJson(res, ok ? 200 : 503, { ok, released, results })
       return
     }
     if (pathPart === '/_gemini-guard/reset') {

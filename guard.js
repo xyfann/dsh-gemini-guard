@@ -487,6 +487,28 @@ export class GeoGuard {
     this.log.info('开关变更，已清除熔断与探测缓存')
   }
 
+  /**
+   * Release the latches that a user action can plausibly have fixed (a re-pasted
+   * key, a switched node) while keeping hard stops. Called by /recheck: the
+   * button says "check the exit again", so it must not leave a stale refusal in
+   * place that only /reset could clear.
+   */
+  releaseSoftBreakers() {
+    const released = []
+    for (const id of this.targetState.keys()) {
+      const state = this.#state(id)
+      if (state.breaker.state === 'open' && state.breaker.hard) continue
+      if (state.breaker.state !== 'closed' || state.upstreamCooldownUntil !== 0 || state.models.size > 0) {
+        released.push(id)
+      }
+      state.breaker = freshBreaker()
+      state.upstreamCooldownUntil = 0
+      state.models.clear()
+    }
+    if (released.length > 0) this.log.info(`复检前已解除软熔断：${released.join(',')}`)
+    return released
+  }
+
   /** Manual reset: clears breakers, then re-probes the exit. */
   async reset(targetId) {
     const ids = targetId ? [targetId] : [...this.targetState.keys()]

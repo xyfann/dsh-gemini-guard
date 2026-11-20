@@ -57,5 +57,22 @@ guard.recordOutcome('gemini', { model: 'gemini-4-argon', kind: 'quota' })
 const quota = await guard.admit('gemini', 'gemini-3.5-flash-lite')
 check('quota cools the route, not just the model', quota.ok === false && quota.reason === 'upstream-cooldown', JSON.stringify(quota))
 
+// A soft latch (bad key, satuation) is released by "check the exit again"; a hard
+// geo stop is not, because that one needs a human decision.
+await guard.reset()
+guard.recordOutcome('gemini', { model: 'gemini-3.7-flash', kind: 'auth' })
+const latched = await guard.admit('gemini', 'gemini-3.7-flash')
+check('an auth rejection trips the route', latched.ok === false, JSON.stringify(latched))
+const released = guard.releaseSoftBreakers()
+const afterRecheck = await guard.admit('gemini', 'gemini-3.7-flash')
+check('recheck releases a soft latch', released.includes('gemini') && afterRecheck.ok === true, `${JSON.stringify(released)} ${JSON.stringify(afterRecheck)}`)
+
+await guard.reset()
+guard.forceHardStop('test', 'hard stop fixture')
+const hard = await guard.admit('gemini', 'gemini-3.7-flash')
+guard.releaseSoftBreakers()
+const stillHard = await guard.admit('gemini', 'gemini-3.7-flash')
+check('recheck keeps a hard stop', hard.ok === false && stillHard.ok === false && stillHard.reason === 'hard-stopped', JSON.stringify(stillHard))
+
 console.log(failed === 0 ? '\n全部通过' : `\n失败 ${failed} 项`)
 process.exitCode = failed === 0 ? 0 : 1
