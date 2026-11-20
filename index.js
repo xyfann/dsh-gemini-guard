@@ -99,6 +99,7 @@ export async function apply(ctx, rawConfig) {
       log,
       persist: createPersist(ctx, log),
       unroute: () => restoreProviderRoutes(ctx, { cfg, log }),
+      route: () => ensureProviderRoutes(ctx, { cfg, log }),
     })
     try {
       await new Promise((resolve, reject) => {
@@ -136,7 +137,25 @@ export async function apply(ctx, rawConfig) {
   registerLlmStreamGuard(ctx, { cfg, guard, log })
   registerHeaderNormalizer(ctx, { cfg, log })
   registerPromptHooks(ctx, { cfg, log, guard })
-  await ensureProviderRoutes(ctx, { cfg, log })
+
+  const routeProvider = () => ensureProviderRoutes(ctx, { cfg, log })
+  const firstRoute = await routeProvider()
+  if (!firstRoute.ok && firstRoute.error !== 'autoRoute-disabled') {
+    // Activation may run inside an HMR transaction, where a nested config write
+    // is refused. Retry after that transaction settles; the panel can also
+    // trigger the same call by hand (POST /_gemini-guard/route).
+    void (async () => {
+      for (const delayMs of [1500, 5000, 15000, 40000]) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+        const result = await routeProvider()
+        if (result.ok) {
+          log.info('路由接管完成（延迟重试）')
+          return
+        }
+      }
+      log.warn('路由接管仍未成功：可在控制面板点「接管路由」，或按详情文档手工写入 provider 配置块')
+    })()
+  }
 
   if (cfg.enabled) {
     // Warm the proof now: the first model call should not be the thing that

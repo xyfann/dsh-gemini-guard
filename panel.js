@@ -128,6 +128,7 @@ export function renderPanel() {
     <div class="actions">
       <button onclick="act('recheck')">复检出口</button>
       <button onclick="act('reset')">复位熔断</button>
+      <button onclick="act('route')">接管路由</button>
       <button onclick="load()">刷新</button>
       <button class="primary" onclick="save()">保存开关</button>
     </div>

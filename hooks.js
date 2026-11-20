@@ -170,30 +170,31 @@ export async function restoreProviderRoutes(ctx, { cfg, log }) {
 export async function ensureProviderRoutes(ctx, { cfg, log }) {
   if (!cfg.features.autoRoute) {
     log.info('自动路由已关闭（features.autoRoute = false），provider baseURL 保持原样')
-    return
+    return { ok: false, written: [], error: 'autoRoute-disabled' }
   }
   const wanted = cfg.enabledTargets.filter((target) => target.manageProviderRoute && target.transport === 'relay')
-  if (wanted.length === 0) return
+  if (wanted.length === 0) return { ok: true, written: [], error: '' }
 
   const editor = ctx.get('configEditor')
   if (!editor || typeof editor.entries !== 'function' || typeof editor.edit !== 'function') {
     log.warn('configEditor 不可用；请按详情文档手动写入 provider 配置块')
-    return
+    return { ok: false, written: [], error: 'configEditor-unavailable' }
   }
 
   let entries = []
   try {
     entries = editor.entries() ?? []
   } catch (error) {
-    log.warn('读取 loader entries 失败，跳过自动写入', error instanceof Error ? error.message : String(error))
-    return
+    const detail = error instanceof Error ? error.message : String(error)
+    log.warn('读取 loader entries 失败，跳过自动写入', detail)
+    return { ok: false, written: [], error: detail }
   }
 
   const nameOf = (entry) => entry?.options?.name ?? entry?.name ?? entry?.plugin?.name ?? ''
   const row = entries.find((entry) => nameOf(entry) === PI_AI_PLUGIN)
   if (!row) {
     log.warn(`未找到 ${PI_AI_PLUGIN} 行；请手动写入 provider 配置块`)
-    return
+    return { ok: false, written: [], error: 'row-not-found' }
   }
 
   const written = []
@@ -223,8 +224,13 @@ export async function ensureProviderRoutes(ctx, { cfg, log }) {
       return dirty ? { ...current, providers } : current
     })
   } catch (error) {
-    log.warn('写入 provider 配置被拒绝，请手动配置', error instanceof Error ? error.message : String(error))
-    return
+    // Activation can happen inside an HMR transaction, where a nested config
+    // write is refused ("HMR transactions cannot be nested"). The caller
+    // retries after the transaction settles; the panel can also trigger it.
+    const detail = error instanceof Error ? error.message : String(error)
+    log.warn('写入 provider 配置被拒绝（稍后重试）', detail)
+    return { ok: false, written, error: detail }
   }
   if (written.length > 0) log.info(`已把 ${written.join(' / ')} 路由指向本机中继`)
+  return { ok: true, written, error: '' }
 }

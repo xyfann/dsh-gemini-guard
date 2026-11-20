@@ -2,6 +2,13 @@
 
 本项目的版本记录。版本号遵循语义化版本：`MAJOR.MINOR.PATCH`，预发布用 `-beta.N`。
 
+## 0.3.1-beta.1 — 2026-11-20
+
+### 修复
+
+- **激活后路由改写失败**：插件在 HMR 事务内被激活时，`configEditor.edit` 会被拒绝（`HMR transactions cannot be nested`），导致 `baseURL` 没有指向中继、模型选择器里看不到受管厂商。现在 `ensureProviderRoutes` 返回结果并按 1.5s / 5s / 15s / 40s 延迟重试，直到事务收尾。
+- 面板新增「接管路由」按钮与 `POST /_gemini-guard/route`，可手动触发同一次改写。
+
 ## 0.3.0-beta.1 — 2026-11-20
 
 首个对外测试版。给按来源 IP 判定地区的大模型路由加一层失败即拒的出口闸门。

@@ -138,7 +138,7 @@ function createSemaphore(max) {
   }
 }
 
-export function createRelayServer({ cfg, guard, log, persist, unroute }) {
+export function createRelayServer({ cfg, guard, log, persist, unroute, route }) {
   const semaphores = new Map()
   const server = http.createServer((req, res) => {
     void handle(req, res)
@@ -250,6 +250,19 @@ export function createRelayServer({ cfg, guard, log, persist, unroute }) {
         return
       }
       writeJson(res, 200, currentSettings(cfg))
+      return
+    }
+    if (pathPart === '/_gemini-guard/route') {
+      if (typeof route !== 'function') {
+        writeJson(res, 503, { ok: false, error: 'route 不可用' })
+        return
+      }
+      try {
+        const result = await route()
+        writeJson(res, result.ok ? 200 : 500, result)
+      } catch (error) {
+        writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) })
+      }
       return
     }
     if (pathPart === '/_gemini-guard/unroute') {
