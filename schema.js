@@ -148,6 +148,8 @@ function buildSchema(Schema) {
       .description('TLS 握手超时（毫秒）。'),
     requestTimeoutMs: Schema.number().default(DEFAULTS.requestTimeoutMs)
       .description('单请求上限（毫秒），长生成用。'),
+    firstByteTimeoutMs: Schema.number().default(DEFAULTS.firstByteTimeoutMs)
+      .description('等待上游响应头的上限（毫秒）。超时本地 504 并明确告知厂商排队，避免静默重试。'),
     maxRequestBytes: Schema.number().default(DEFAULTS.maxRequestBytes)
       .description('请求体上限（字节）。'),
     logFile: Schema.string().default(DEFAULTS.logFile)

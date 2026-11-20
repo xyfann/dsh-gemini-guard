@@ -409,8 +409,18 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
         upstreamRequest.destroy(new Error('上游请求超时'))
       }, cfg.requestTimeoutMs)
 
+      // A vendor that accepts the request but never sends response headers leaves
+      // the caller waiting with no signal. Bound that separately from the whole
+      // request: fail fast and say which phase stalled.
+      const firstByteTimer = setTimeout(() => {
+        if (responded) return
+        log.warn('上游迟迟未返回响应头', `${target.id} ${requestPath}（${cfg.firstByteTimeoutMs} ms）`)
+        upstreamRequest.destroy(new Error(`FIRST_BYTE_TIMEOUT: 上游在 ${cfg.firstByteTimeoutMs} ms 内未返回响应头`))
+      }, cfg.firstByteTimeoutMs)
+
       upstreamRequest.on('error', (error) => {
         clearTimeout(timer)
+        clearTimeout(firstByteTimer)
         releaseSlot()
         if (clientGone) {
           log.info('客户端取消，已中止上游请求', `${target.id} ${requestPath}`)
@@ -419,6 +429,12 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
         if (responded) {
           guard.recordOutcome(target.id, { kind: 'late-abort', detail: `响应中断：${error.message}` })
           res.destroy(error)
+          return
+        }
+        if (String(error.message).startsWith('FIRST_BYTE_TIMEOUT')) {
+          writeJson(res, 504, {
+            error: { code: 504, message: `[dsh-gemini-guard] 上游 ${target.upstreamHost} 在 ${cfg.firstByteTimeoutMs} ms 内没有返回响应头（多半是厂商排队/高负载），已本地中止，未重试`, status: 'DEADLINE_EXCEEDED' },
+          }, { 'x-gemini-guard': 'first-byte-timeout' })
           return
         }
         guard.recordOutcome(target.id, { kind: 'transport', detail: `上游请求失败：${error.message}` })
@@ -430,6 +446,7 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
       upstreamRequest.on('response', (upstreamResponse) => {
         responded = true
         clearTimeout(timer)
+        clearTimeout(firstByteTimer)
         const status = upstreamResponse.statusCode ?? 0
         const headers = {}
         for (const [name, value] of Object.entries(upstreamResponse.headers)) {
@@ -482,6 +499,9 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
         let complete = false
 
         res.writeHead(status, headers)
+        // Send the headers before the first body chunk: an SSE client that waits
+        // for `response` would otherwise see nothing while a slow model thinks.
+        res.flushHeaders?.()
         stream.on('data', (chunk) => {
           if (!streaming || complete) return
           if (sawTerminator(chunk.toString('utf8'))) complete = true

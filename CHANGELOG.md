@@ -13,6 +13,18 @@
 - GitHub 侧只做一次浅 fetch 到临时裸库、读 tree 里的 blob sha，不下载仓库、不改用户的 `.git`。
 - `test/diff.mjs`：离线覆盖六种情形——基线、安装副本被改、安装副本多出文件、工作区未提交、推送重装后回到一致、远端不可达。
 
+## 0.4.2-beta.1 — 2026-11-20
+
+### 新增
+
+- **首字节超时（`firstByteTimeoutMs`，默认 90 秒）**：厂商接受请求后长时间不返回响应头（排队/高负载）时，本地以 `504 DEADLINE_EXCEEDED` 明确中止，面板打 `x-gemini-guard: first-byte-timeout`。此前它和"卡死"无法区分，只会静默等满整轮并触发上层重试。
+- SSE 响应在 `writeHead` 之后立即 `flushHeaders()`：慢模型思考期间，客户端也能先拿到响应头。
+
+### 说明（排障结论）
+
+- 现场：VPN 关闭时被正确拦截（`target-unreachable`）；恢复并复位后"一直不回复"。实测同一请求**直连 22.5s、经中继 14s 才出首字节**，`gemini-3.6-flash` 直连 40s 超时，`gemini-3.8-flash`/`gemini-flash-latest` 返回 `503 high demand`。中继的 SSE 本身是通的（5 个 `data:` 块 + `finishReason`）。
+- 也就是说：**不是插件把请求卡住，而是 Google 侧排队 + DSH 默认重试（最多 5 次）叠加**，体感像"卡死"。建议给该路由设 `retryPolicy.maxRetries: 1`，并优先选当下不拥堵的型号。
+
 ## 0.4.1-beta.1 — 2026-11-20
 
 ### 修复（严重）

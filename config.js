@@ -168,6 +168,11 @@ export const DEFAULTS = {
   connectTimeoutMs: 8000,
   tlsTimeoutMs: 8000,
   requestTimeoutMs: 900000,
+  // How long to wait for upstream *response headers* before giving up. Separate
+  // from requestTimeoutMs because a vendor that accepts the request and then
+  // queues it is indistinguishable from a hang, and retrying it silently is the
+  // worst outcome.
+  firstByteTimeoutMs: 90000,
   maxRequestBytes: 33554432,
 
   // Burst shaping: subagents and workflows can fire many calls at once, which is
@@ -348,6 +353,7 @@ export function resolveConfig(raw, { harnessHome } = {}) {
   cfg.connectTimeoutMs = int(cfg.connectTimeoutMs, 'connectTimeoutMs', problems, 200, 120000)
   cfg.tlsTimeoutMs = int(cfg.tlsTimeoutMs, 'tlsTimeoutMs', problems, 200, 120000)
   cfg.requestTimeoutMs = int(cfg.requestTimeoutMs, 'requestTimeoutMs', problems, 5000, 3600000)
+  cfg.firstByteTimeoutMs = int(cfg.firstByteTimeoutMs, 'firstByteTimeoutMs', problems, 1000, 600000)
   cfg.maxRequestBytes = int(cfg.maxRequestBytes, 'maxRequestBytes', problems, 65536, 268435456)
   cfg.limits.maxConcurrentPerTarget = int(cfg.limits.maxConcurrentPerTarget, 'limits.maxConcurrentPerTarget', problems, 1, 64)
   cfg.limits.queueTimeoutMs = int(cfg.limits.queueTimeoutMs, 'limits.queueTimeoutMs', problems, 1000, 600000)
