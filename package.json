@@ -1,6 +1,6 @@
 {
   "name": "dsh-gemini-guard",
-  "version": "0.4.2-beta.1",
+  "version": "0.4.3-beta.1",
   "description": "Fail-closed egress gate, pre-flight risk assessment, and circuit breaker for vendor model routes that judge the caller by public IP (Gemini, OpenAI, Anthropic, xAI).",
   "type": "module",
   "main": "index.js",

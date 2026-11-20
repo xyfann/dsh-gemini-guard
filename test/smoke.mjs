@@ -60,6 +60,7 @@ async function startRelay(overrides) {
     // routing tunnel would silently change what they test.
     features: { pathAware: false, ...(overrides.features ?? {}) },
     targets: overrides.targets,
+    ...(overrides.limits === undefined ? {} : { limits: overrides.limits }),
   })
   const log = createLogger(cfg)
   const guard = new GeoGuard(cfg, log)
@@ -134,12 +135,45 @@ async function scenarioPathAware() {
   await relay.close()
 }
 
+async function scenarioAbortedClients() {
+  // Regression: a client that disconnects before the tunnel is built used to
+  // strand its concurrency slot. With maxConcurrentPerTarget = 1, four aborted
+  // handshakes exhausted the target and every later request waited out the queue
+  // timeout — indistinguishable from a hang. The slot is now released from the
+  // close handler attached before any waiting.
+  const relay = await startRelay({
+    egress: { allowedCountries: [], confirmations: 1, requireStableExit: false },
+    limits: { maxConcurrentPerTarget: 1, queueTimeoutMs: 5000 },
+  })
+
+  for (let i = 0; i < 4; i += 1) {
+    const req = http.request({ host: '127.0.0.1', port, path: '/gemini/v1beta/models?key=ABORTED', method: 'GET', agent: false })
+    req.on('error', () => {})
+    req.end()
+    req.destroy()
+  }
+  await new Promise((resolve) => setTimeout(resolve, 400))
+
+  const startedAt = Date.now()
+  const response = await request('/gemini/v1beta/models?key=INVALID_TEST_KEY')
+  const elapsed = Date.now() - startedAt
+  check('aborted clients do not leak the concurrency slot', elapsed < 5000, `${elapsed} ms, http ${response.status}`)
+  check('request still reaches the vendor after aborts', String(response.headers['x-gemini-guard']).startsWith('upstream-'), String(response.headers['x-gemini-guard']))
+
+  const status = JSON.parse((await request('/_gemini-guard/status')).body)
+  check('status exposes relay concurrency', status.relay !== undefined && status.relay.semaphores.gemini !== undefined, JSON.stringify(status.relay ?? null))
+  check('no slot is left active', (status.relay?.semaphores?.gemini?.active ?? 1) === 0, JSON.stringify(status.relay?.semaphores ?? null))
+
+  await relay.close()
+}
+
 async function main() {
   for (const [name, scenario] of [
     ['wrong region', scenarioWrongRegion],
     ['confirmation then forward', scenarioConfirmationThenForward],
     ['panel and settings', scenarioPanelAndSettings],
     ['path aware', scenarioPathAware],
+    ['aborted clients', scenarioAbortedClients],
   ]) {
     try {
       await scenario()

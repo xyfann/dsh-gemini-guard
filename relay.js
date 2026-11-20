@@ -135,6 +135,9 @@ function createSemaphore(max) {
       if (next) next()
       else active = Math.max(0, active - 1)
     },
+    stats() {
+      return { max, active, waiting: waiters.length }
+    },
   }
 }
 
@@ -219,7 +222,14 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
       return
     }
     if (pathPart === '/_gemini-guard/status') {
-      writeJson(res, 200, guard.snapshot())
+      const snapshot = guard.snapshot()
+      // Concurrency state is the first thing to look at when requests "hang":
+      // a saturated queue looks identical to a stalled upstream.
+      snapshot.relay = {
+        maxConcurrentPerTarget: cfg.limits.maxConcurrentPerTarget,
+        semaphores: Object.fromEntries([...semaphores.entries()].map(([id, semaphore]) => [id, semaphore.stats()])),
+      }
+      writeJson(res, 200, snapshot)
       return
     }
     if (pathPart === '/_gemini-guard/settings') {
@@ -335,6 +345,25 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
     let bytes = 0
     let tooLarge = false
 
+    // One place owns the concurrency slot and the upstream request so a client
+    // that disconnects *before* the tunnel is built cannot strand the slot. That
+    // window is how a cancelled turn used to exhaust the semaphore and make every
+    // later request look like it hung.
+    const state = { slot: { release() {} }, upstream: null, clientGone: false, released: false }
+    const releaseSlot = () => {
+      if (state.released) return
+      state.released = true
+      state.slot.release()
+    }
+    res.on('close', () => {
+      if (res.writableEnded) return
+      state.clientGone = true
+      state.upstream?.destroy(new Error('客户端已断开'))
+      releaseSlot()
+    })
+    // A response torn down by the peer must not raise an unhandled error.
+    res.on('error', () => {})
+
     req.on('data', (chunk) => {
       if (tooLarge) return
       bytes += chunk.length
@@ -355,14 +384,25 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
     })
 
     async function dispatch(body) {
-      let slot = { release() {} }
+      if (state.clientGone) return
       if (cfg.features.burstLimit) {
         try {
-          slot = await semaphoreFor(target.id).acquire(cfg.limits.queueTimeoutMs)
+          state.slot = await semaphoreFor(target.id).acquire(cfg.limits.queueTimeoutMs)
         } catch (error) {
           writeJson(res, 503, {
             error: { code: 503, message: `[dsh-gemini-guard] ${error.message}`, status: 'UNAVAILABLE' },
           }, { 'x-gemini-guard': 'throttled' })
+          return
+        }
+        if (state.clientGone) {
+          releaseSlot()
+          return
+        }
+        // The close handler may have run while this acquire was pending, having
+        // already spent its one release on the placeholder slot. Hand the real
+        // slot back instead of relying on a second release that will not come.
+        if (state.released) {
+          state.slot.release()
           return
         }
       }
@@ -377,32 +417,21 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
           headers: buildUpstreamHeaders(target, req.headers),
         })
       } catch (error) {
-        slot.release()
+        releaseSlot()
         guard.recordOutcome(target.id, { kind: 'transport', detail: `建立出口连接失败：${error.message}` })
         writeJson(res, 502, {
           error: { code: 502, message: `[dsh-gemini-guard] 无法建立到 ${target.upstreamHost} 的出口连接：${error.message}`, status: 'UNAVAILABLE' },
         }, { 'x-gemini-guard': 'egress-unreachable' })
         return
       }
-
-      let responded = false
-      let clientGone = false
-      let released = false
-      const releaseSlot = () => {
-        if (released) return
-        released = true
-        slot.release()
-      }
-
-      // The user pressing Stop, or a cancelled turn, must cancel the upstream
-      // request too: an abandoned generation keeps billing and looks like
-      // hammering from the vendor's side.
-      res.on('close', () => {
-        if (res.writableEnded) return
-        clientGone = true
+      state.upstream = upstreamRequest
+      if (state.clientGone) {
         upstreamRequest.destroy(new Error('客户端已断开'))
         releaseSlot()
-      })
+        return
+      }
+
+      let responded = false
 
       const timer = setTimeout(() => {
         if (!responded) log.warn('上游响应超时', `${target.id} ${requestPath}`)
@@ -422,7 +451,7 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
         clearTimeout(timer)
         clearTimeout(firstByteTimer)
         releaseSlot()
-        if (clientGone) {
+        if (state.clientGone) {
           log.info('客户端取消，已中止上游请求', `${target.id} ${requestPath}`)
           return
         }
@@ -482,13 +511,13 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
             headers['x-gemini-guard-kind'] = verdict.kind
             headers['content-length'] = String(Buffer.byteLength(text))
             headers['content-type'] = headers['content-type'] ?? 'application/json; charset=utf-8'
-            if (clientGone) return
+            if (state.clientGone) return
             res.writeHead(status, headers)
             res.end(text)
           })
           stream.on('error', (error) => {
             releaseSlot()
-            if (clientGone) return
+            if (state.clientGone) return
             guard.recordOutcome(target.id, { kind: 'late-abort', detail: `读取上游错误响应失败：${error.message}` })
             res.destroy(error)
           })
@@ -510,19 +539,19 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
           releaseSlot()
           if (streaming && !complete) {
             guard.recordOutcome(target.id, { kind: 'late-abort', detail: `流在无结束标记的情况下关闭：${target.id} ${requestPath}` })
-          } else if (!clientGone) {
+          } else if (!state.clientGone) {
             guard.recordOutcome(target.id, { kind: 'ok' })
           }
           if (!res.writableEnded) res.end()
         })
         stream.on('error', (error) => {
           releaseSlot()
-          if (clientGone) return
+          if (state.clientGone) return
           guard.recordOutcome(target.id, { kind: 'late-abort', detail: `响应流错误：${error.message}` })
           if (!res.writableEnded) res.destroy(error)
         })
         upstreamResponse.on('aborted', () => {
-          if (clientGone) return
+          if (state.clientGone) return
           guard.recordOutcome(target.id, { kind: 'late-abort', detail: '上游在响应中途断开（aborted）' })
         })
         stream.pipe(res)

@@ -68,6 +68,17 @@ function message(error) {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** Bound a promise that has no timeout of its own (DNS, mostly). */
+function withDeadline(promise, timeoutMs, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      const timer = setTimeout(() => reject(new Error(`${label}（${timeoutMs} ms）`)), timeoutMs)
+      timer.unref?.()
+    }),
+  ])
+}
+
 export class GeoGuard {
   constructor(cfg, log) {
     this.cfg = cfg
@@ -133,8 +144,12 @@ export class GeoGuard {
     // lookup below is then measuring something else entirely.
     await Promise.all(this.cfg.enabledTargets.map(async (target) => {
       try {
-        const addresses = (await lookup(target.upstreamHost, { all: true })).map((entry) => entry.address)
-        cache.splitTunnel.set(target.id, detectSplitTunnel(addresses))
+        const resolved = await withDeadline(
+          lookup(target.upstreamHost, { all: true }),
+          this.cfg.egress.timeoutMs,
+          `DNS 解析超时：${target.upstreamHost}`,
+        )
+        cache.splitTunnel.set(target.id, detectSplitTunnel(resolved.map((entry) => entry.address)))
       } catch {
         cache.splitTunnel.set(target.id, null)
       }
@@ -511,6 +526,7 @@ export class GeoGuard {
           }
         : { phase: 'unprobed', error: cache?.geoError ?? '' },
       features: { ...this.cfg.features },
+      refreshInFlight: this.refreshing !== null,
       policy: {
         requireStableExit: this.cfg.egress.requireStableExit,
         maxDistinctExitIps: this.cfg.egress.maxDistinctExitIps,
