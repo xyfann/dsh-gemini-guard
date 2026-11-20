@@ -198,37 +198,47 @@ export async function ensureProviderRoutes(ctx, { cfg, log }) {
   }
 
   const written = []
+  const EDIT_TIMEOUT_MS = 10000
   try {
-    await editor.edit(row, (current) => {
-      const providers = { ...(current?.providers ?? {}) }
-      let dirty = false
-      for (const target of wanted) {
-        const existing = providers[target.route] ?? {}
-        const existingBase = typeof existing.baseURL === 'string' ? existing.baseURL : ''
-        const relayRoot = target.relayBaseUrl.slice(0, target.relayBaseUrl.length - target.upstreamBasePath.length)
-        if (existingBase !== '' && !existingBase.startsWith(relayRoot)) {
-          log.warn(`${target.route} 路由已指向 ${existingBase}，与本机中继 ${relayRoot} 不一致；保持原样，请自行确认`)
-          continue
+    // A hanging editor must not hang its caller (the retry ladder or the panel
+    // endpoint). Racing it keeps the failure observable and bounded.
+    await Promise.race([
+      editor.edit(row, (current) => {
+        const providers = { ...(current?.providers ?? {}) }
+        let dirty = false
+        for (const target of wanted) {
+          const existing = providers[target.route] ?? {}
+          const existingBase = typeof existing.baseURL === 'string' ? existing.baseURL : ''
+          const relayRoot = target.relayBaseUrl.slice(0, target.relayBaseUrl.length - target.upstreamBasePath.length)
+          if (existingBase !== '' && !existingBase.startsWith(relayRoot)) {
+            log.warn(`${target.route} 路由已指向 ${existingBase}，与本机中继 ${relayRoot} 不一致；保持原样，请自行确认`)
+            continue
+          }
+          const candidate = {
+            ...existing,
+            displayName: existing.displayName ?? target.displayName,
+            apiKeyEnv: existing.apiKeyEnv ?? target.apiKeyRef,
+            baseURL: target.relayBaseUrl,
+          }
+          if (JSON.stringify(candidate) === JSON.stringify(existing)) continue
+          providers[target.route] = candidate
+          written.push(target.route)
+          dirty = true
         }
-        const candidate = {
-          ...existing,
-          displayName: existing.displayName ?? target.displayName,
-          apiKeyEnv: existing.apiKeyEnv ?? target.apiKeyRef,
-          baseURL: target.relayBaseUrl,
-        }
-        if (JSON.stringify(candidate) === JSON.stringify(existing)) continue
-        providers[target.route] = candidate
-        written.push(target.route)
-        dirty = true
-      }
-      return dirty ? { ...current, providers } : current
-    })
+        return dirty ? { ...current, providers } : current
+      }),
+      new Promise((_, reject) => {
+        const timer = setTimeout(() => reject(new Error(`config editor did not settle within ${EDIT_TIMEOUT_MS} ms`)), EDIT_TIMEOUT_MS)
+        timer.unref?.()
+      }),
+    ])
   } catch (error) {
     // Activation can happen inside an HMR transaction, where a nested config
-    // write is refused ("HMR transactions cannot be nested"). The caller
-    // retries after the transaction settles; the panel can also trigger it.
+    // write is refused ("HMR transactions cannot be nested") or hangs. The
+    // caller retries after the transaction settles; the panel can also trigger
+    // it by hand.
     const detail = error instanceof Error ? error.message : String(error)
-    log.warn('写入 provider 配置被拒绝（稍后重试）', detail)
+    log.warn('写入 provider 配置未完成（稍后重试）', detail)
     return { ok: false, written, error: detail }
   }
   if (written.length > 0) log.info(`已把 ${written.join(' / ')} 路由指向本机中继`)

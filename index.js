@@ -138,24 +138,39 @@ export async function apply(ctx, rawConfig) {
   registerHeaderNormalizer(ctx, { cfg, log })
   registerPromptHooks(ctx, { cfg, log, guard })
 
+  // Route takeover must never block activation.
+  //
+  // Cordis loads a bundle inside an HMR transaction, and `configEditor.edit()`
+  // during that window can hang instead of failing. An `await` here therefore
+  // held `apply()` open and the host never reached ready — the app window never
+  // opened. Activation returns first; the takeover runs on a timer, then walks
+  // the retry ladder. The same call is exposed as POST /_gemini-guard/route.
   const routeProvider = () => ensureProviderRoutes(ctx, { cfg, log })
-  const firstRoute = await routeProvider()
-  if (!firstRoute.ok && firstRoute.error !== 'autoRoute-disabled') {
-    // Activation may run inside an HMR transaction, where a nested config write
-    // is refused. Retry after that transaction settles; the panel can also
-    // trigger the same call by hand (POST /_gemini-guard/route).
+  const routeTimer = setTimeout(() => {
     void (async () => {
+      try {
+        const first = await routeProvider()
+        if (first.ok || first.error === 'autoRoute-disabled') return
+      } catch (error) {
+        log.warn('路由接管异常（稍后重试）', message(error))
+      }
       for (const delayMs of [1500, 5000, 15000, 40000]) {
         await new Promise((resolve) => setTimeout(resolve, delayMs))
-        const result = await routeProvider()
-        if (result.ok) {
-          log.info('路由接管完成（延迟重试）')
-          return
+        try {
+          const result = await routeProvider()
+          if (result.ok || result.error === 'autoRoute-disabled') {
+            log.info('路由接管完成（延迟重试）')
+            return
+          }
+        } catch (error) {
+          log.warn('路由接管重试异常', message(error))
         }
       }
       log.warn('路由接管仍未成功：可在控制面板点「接管路由」，或按详情文档手工写入 provider 配置块')
     })()
-  }
+  }, 1500)
+  routeTimer.unref?.()
+  ctx.effect(() => () => clearTimeout(routeTimer))
 
   if (cfg.enabled) {
     // Warm the proof now: the first model call should not be the thing that
