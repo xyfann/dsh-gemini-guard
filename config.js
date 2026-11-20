@@ -113,6 +113,10 @@ export const DEFAULTS = {
     streamWatch: true,
     // Point the provider routes at this relay on activation.
     autoRoute: true,
+    // When a split tunnel rewrites the vendor's DNS, the third-party
+    // geolocation probe measures a different path. In that case stop gating on
+    // that measurement and let the vendor's own refusal decide.
+    pathAware: true,
   },
 
   listenHost: '127.0.0.1',

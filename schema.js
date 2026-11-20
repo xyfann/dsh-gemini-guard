@@ -70,6 +70,8 @@ function buildSchema(Schema) {
         .description('流没有终止标记时判为中断（计入稳定性）。'),
       autoRoute: Schema.boolean().default(features.autoRoute)
         .description('启动时把 provider 路由指向中继。改动需重启生效。'),
+      pathAware: Schema.boolean().default(features.pathAware)
+        .description('域名分流（智能分流）环境下，厂商域名解析到假 IP 时，第三方地理探测不代表真实路径；开启后地区判定改由厂商回包决定。'),
     }).description('逐项功能开关。'),
 
     egress: Schema.object({

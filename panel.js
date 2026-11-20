@@ -192,7 +192,8 @@ function fillForm(s) {
     ['promptContext', '提示词环境信息（注入 + 时区改写）', '关闭后模型看不到声明的地区/时区'],
     ['burstLimit', '并发整形（每个厂商排队）', '关闭后并发直冲上游'],
     ['streamWatch', '流中断检测', '关闭后流无终止标记也算正常结束'],
-    ['autoRoute', '启动时接管 provider 路由', '改动需重启插件生效']
+    ['autoRoute', '启动时接管 provider 路由', '改动需重启插件生效'],
+    ['pathAware', '分流感知（智能分流环境）', '厂商域名解析到假 IP 时，改用厂商回包判定地区']
   ];
   var html = '';
   for (var i = 0; i < FEATURES.length; i++) {

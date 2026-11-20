@@ -55,6 +55,10 @@ async function startRelay(overrides) {
     listenPort: port,
     logFile: path.join(os.tmpdir(), 'dsh-gemini-guard-smoke.log'),
     egress: { ttlMs: 3000, maxDistinctExitIps: 5, ...(overrides.egress ?? {}) },
+    // The scenarios below assert the country gate, so they opt out of the
+    // split-tunnel override; otherwise a developer machine behind a smart
+    // routing tunnel would silently change what they test.
+    features: { pathAware: false, ...(overrides.features ?? {}) },
     targets: overrides.targets,
   })
   const log = createLogger(cfg)
@@ -109,11 +113,33 @@ async function scenarioPanelAndSettings() {
   await relay.close()
 }
 
+async function scenarioPathAware() {
+  // The contract does not depend on this machine's network: when the vendor host
+  // is captured by a splitting tunnel the request must be forwarded (the vendor
+  // decides), and when it is not the country gate must still refuse. Read the
+  // observed state first, then assert the matching half of the invariant.
+  const relay = await startRelay({ egress: { allowedCountries: ['TW'], confirmations: 1 }, features: { pathAware: true } })
+  await request('/_gemini-guard/recheck?target=gemini', 'POST')
+  const status = JSON.parse((await request('/_gemini-guard/status')).body)
+  const marker = status.targets.gemini.splitTunnel
+  const response = await request('/gemini/v1beta/models?key=INVALID_TEST_KEY')
+  const tag = String(response.headers['x-gemini-guard'])
+
+  if (marker) {
+    check('split tunnel detected -> request is forwarded', tag.startsWith('upstream-'), `${marker} => ${tag}`)
+  } else {
+    check('no split tunnel -> country gate still refuses', tag === 'blocked-country-not-allowed', `${marker} => ${tag}`)
+  }
+  console.log(`INFO  splitTunnel=${marker ?? 'none'} 判定=${tag}`)
+  await relay.close()
+}
+
 async function main() {
   for (const [name, scenario] of [
     ['wrong region', scenarioWrongRegion],
     ['confirmation then forward', scenarioConfirmationThenForward],
     ['panel and settings', scenarioPanelAndSettings],
+    ['path aware', scenarioPathAware],
   ]) {
     try {
       await scenario()

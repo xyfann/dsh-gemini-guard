@@ -8,7 +8,9 @@
 //                            the others.
 import fs from 'node:fs'
 import path from 'node:path'
+import { lookup } from 'node:dns/promises'
 import { countryListFor, targetForRoute } from './config.js'
+import { detectSplitTunnel } from './egress-path.js'
 import { ExitHistory, assessEgress } from './risk.js'
 import { getThroughEgress, openOutbound } from './transport.js'
 
@@ -113,7 +115,7 @@ export class GeoGuard {
 
   async #doRefresh() {
     const at = Date.now()
-    const cache = { at, geo: null, geoError: '', reach: new Map(), unverified: false }
+    const cache = { at, geo: null, geoError: '', reach: new Map(), splitTunnel: new Map(), unverified: false }
 
     if (!this.cfg.features.egressProbe) {
       cache.unverified = true
@@ -125,6 +127,18 @@ export class GeoGuard {
       }
       return cache
     }
+
+    // Which path does the vendor host actually take? A fake/non-public address
+    // means a domain-splitting tunnel captured it, and the external geolocation
+    // lookup below is then measuring something else entirely.
+    await Promise.all(this.cfg.enabledTargets.map(async (target) => {
+      try {
+        const addresses = (await lookup(target.upstreamHost, { all: true })).map((entry) => entry.address)
+        cache.splitTunnel.set(target.id, detectSplitTunnel(addresses))
+      } catch {
+        cache.splitTunnel.set(target.id, null)
+      }
+    }))
 
     try {
       const response = await getThroughEgress(this.net, this.cfg.egress.geoUrl, {
@@ -210,6 +224,24 @@ export class GeoGuard {
     const reach = cache.reach.get(target.id)
     if (!reach || reach.ok !== true) {
       return { ok: false, reason: 'target-unreachable', detail: `${target.upstreamHost} 不可达：${reach?.detail ?? '未知原因'}` }
+    }
+    // The vendor host resolves into a fake/non-public range: a domain-splitting
+    // tunnel captured it, while the geolocation probe almost certainly did not.
+    // The country and the exit-quality numbers therefore describe another path,
+    // so gating on them would refuse traffic that is actually fine. Reachability
+    // above already measured the real path; the region verdict now comes from
+    // the vendor's own answer on a real request.
+    const marker = cache.splitTunnel?.get(target.id) ?? null
+    if (marker && this.cfg.features.pathAware) {
+      if (!this.warnedSplitTunnel) {
+        this.warnedSplitTunnel = true
+        this.log.warn(
+          '检测到域名分流（智能分流）',
+          `${target.upstreamHost} 解析到 ${marker}，第三方地理探测不代表 API 路径；`
+          + '地区判定改由厂商回包决定，机房/代理/时区/跳动规则不再据此拦截',
+        )
+      }
+      return { ok: true, pathAware: true, reason: 'path-aware', splitTunnel: marker, geo: cache.geo, reach }
     }
     const countries = countryListFor(this.cfg, target)
     if (countries.length > 0 && !countries.includes(cache.geo.countryCode)) {
@@ -441,6 +473,7 @@ export class GeoGuard {
         allowedCountries: countryListFor(this.cfg, target),
         reachable: reach?.ok ?? null,
         reachDetail: reach?.detail ?? null,
+        splitTunnel: cache?.splitTunnel?.get(target.id) ?? null,
         breaker: {
           state: state.breaker.state,
           reason: state.breaker.reason,
