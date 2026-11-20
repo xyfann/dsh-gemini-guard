@@ -32,6 +32,9 @@
       "patch": "./cordis.patch.yml"
     }
   },
+  "scripts": {
+    "test": "node test/risk.mjs && node test/config.mjs && node test/schema.mjs && node test/smoke.mjs"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -66,4 +69,5 @@
   },
   "homepage": "https://github.com/xyfann/dsh-gemini-guard#readme"
 }
+
 
