@@ -82,6 +82,16 @@ plugin_manager install_bundle  target = github:xyfann/dsh-gemini-guard
 
 同一个 target 已安装时，管理器会返回 `already-installed`；按它的提示先 `remove_bundle`，再 `install_bundle`。
 
+### 不要用 `pnpm patch` 给已安装的插件打补丁
+
+紧急修 bug 时很容易顺手 `pnpm patch` 到 profile 里：它在 `pnpm-workspace.yaml` 写入一条 `patchedDependencies`，把补丁**锁死在某个版本号**上。之后的后果是 `remove_bundle` 与 `install_bundle` 都会失败：
+
+```
+ERR_PNPM_UNUSED_PATCH  The following patches were not used: dsh-gemini-guard@0.3.1-beta.1
+```
+
+补丁只能匹配它写明的那个版本，换版本即失效；而失效的补丁会阻塞整条安装链。正确顺序永远是：**仓库里改 → 发版 → 管理器装**。已经打了补丁的话，删除 `patchedDependencies` 条目并移走补丁文件，再重试管理器。
+
 ### 安装方式决定一件事：路由改写要等重启
 
 `llm-pi-ai` 的 provider 路由由插件通过 `configEditor` 写入。而 **HMR 激活**（安装后被热加载进正在运行的进程）处在一个 loader 事务内，嵌套的配置写入会被拒绝：
