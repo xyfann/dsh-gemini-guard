@@ -294,6 +294,13 @@ function resolveTarget(id, cfg, problems) {
   } else {
     target.headers.forwardHeaders = target.headers.forwardHeaders.map((name) => String(name).toLowerCase())
   }
+  // An empty list almost always means "a config schema materialised its array
+  // default", not "forward nothing". Dropping the vendor's auth header turns
+  // every request into an anonymous one, which vendors answer with a permission
+  // error that looks like a key problem. Fall back to the vendor default.
+  if (target.headers.forwardHeaders.length === 0) {
+    target.headers.forwardHeaders = [...(TARGET_DEFAULTS[id]?.headers.forwardHeaders ?? [])]
+  }
   return target
 }
 

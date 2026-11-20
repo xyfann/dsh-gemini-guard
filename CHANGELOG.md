@@ -13,6 +13,15 @@
 - GitHub 侧只做一次浅 fetch 到临时裸库、读 tree 里的 blob sha，不下载仓库、不改用户的 `.git`。
 - `test/diff.mjs`：离线覆盖六种情形——基线、安装副本被改、安装副本多出文件、工作区未提交、推送重装后回到一致、远端不可达。
 
+## 0.4.1-beta.1 — 2026-11-20
+
+### 修复（严重）
+
+- **鉴权头被静默丢弃**：`schema.js` 里 `headers.forwardHeaders` 用的是 `Schema.array(Schema.string())`，schemastery 对数组的默认值是 `[]`。以"依赖安装"方式运行时，加载器用 `Config()` 补全配置，把这个空数组写进运行配置，**覆盖掉厂商默认的鉴权头列表**（Gemini 的 `x-goog-api-key` 等）。结果中继发出的是匿名请求，Google 回 `403 PERMISSION_DENIED "Permission denied on the service."`——看起来像 key 无效，实际是中继没把 key 转发出去。
+  - 判别方法：同一把 key 经中继用 `?key=` 传参是 200，用请求头传是 403；直连两种都 200。
+  - 修复：`resolveConfig` 遇到空的 `forwardHeaders` 时回落到该厂商的默认列表（显式非空列表照旧保留）。
+  - 回归测试：`test/config.mjs` 增加三项（gemini/anthropic 回落、显式列表保留）。
+
 ## 0.4.0-beta.1 — 2026-11-20
 
 ### 新增

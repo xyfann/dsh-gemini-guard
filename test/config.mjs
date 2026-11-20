@@ -55,6 +55,27 @@ check('grok route is the pi-ai catalog name', cfg.targets.grok.route === 'xai', 
 check('anthropic keeps its own auth headers', cfg.targets.anthropic.headers.forwardHeaders.includes('x-api-key'), JSON.stringify(cfg.targets.anthropic.headers.forwardHeaders))
 check('log path lands under the harness home', cfg.logFile.endsWith('gemini-guard.log'), cfg.logFile)
 
+// A config schema materialises array defaults as [], which used to overwrite the
+// vendor's auth-header list and silently turned every request anonymous (the
+// vendor answers 403, which reads like a key problem).
+{
+  const guarded = resolveConfig({
+    targets: {
+      gemini: { enabled: true, headers: { forwardHeaders: [] } },
+      anthropic: { enabled: true, headers: { forwardHeaders: [] } },
+    },
+  }, {})
+  check('empty forwardHeaders falls back to the vendor default (gemini)',
+    guarded.targets.gemini.headers.forwardHeaders.includes('x-goog-api-key'),
+    JSON.stringify(guarded.targets.gemini.headers.forwardHeaders))
+  check('empty forwardHeaders falls back to the vendor default (anthropic)',
+    guarded.targets.anthropic.headers.forwardHeaders.includes('x-api-key'),
+    JSON.stringify(guarded.targets.anthropic.headers.forwardHeaders))
+  check('an explicit list is preserved',
+    resolveConfig({ targets: { gemini: { enabled: true, headers: { forwardHeaders: ['x-custom'] } } } }, {})
+      .targets.gemini.headers.forwardHeaders.join(',') === 'x-custom')
+}
+
 const failures = []
 try {
   resolveConfig({
