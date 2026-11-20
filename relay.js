@@ -138,7 +138,7 @@ function createSemaphore(max) {
   }
 }
 
-export function createRelayServer({ cfg, guard, log, persist, unroute, route }) {
+export function createRelayServer({ cfg, guard, log, persist, unroute, route, integrity }) {
   const semaphores = new Map()
   const server = http.createServer((req, res) => {
     void handle(req, res)
@@ -289,6 +289,24 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route }) 
     if (pathPart === '/_gemini-guard/reset') {
       const result = await guard.reset(targetId ?? undefined)
       writeJson(res, result.ok ? 200 : 503, { ok: result.ok, result })
+      return
+    }
+    if (pathPart === '/_gemini-guard/diff') {
+      // 三份代码 diff：工作区 ↔ GitHub ↔ 已安装副本。默认比本插件自己。
+      if (!integrity) {
+        writeJson(res, 503, { ok: false, error: 'diff 不可用' })
+        return
+      }
+      try {
+        const report = await integrity.check(targetId || 'dsh-gemini-guard', {
+          repo: query.get('repo') ?? '',
+          ref: query.get('ref') ?? '',
+          refresh: query.get('refresh') === '1' || req.method === 'POST',
+        })
+        writeJson(res, 200, report)
+      } catch (error) {
+        writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) })
+      }
       return
     }
     writeJson(res, 404, { error: { code: 404, message: `未知控制端点 ${pathPart}` } })

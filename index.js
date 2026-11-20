@@ -9,6 +9,7 @@
 // fails.
 import { resolveConfig } from './config.js'
 import { createLogger, GeoGuard } from './guard.js'
+import { createIntegrityChecker } from './integrity.js'
 import { createRelayServer } from './relay.js'
 import {
   ensureProviderRoutes,
@@ -90,6 +91,8 @@ export async function apply(ctx, rawConfig) {
   const cfg = resolveConfig(rawConfig, { harnessHome: process.env.DSH_HOME })
   const log = createLogger(cfg)
   const guard = new GeoGuard(cfg, log)
+  // 三份代码对比（工作区 / GitHub / 已安装）不需要任何配置：位置从环境变量推。
+  const integrity = createIntegrityChecker({ log })
 
   const relayTargets = cfg.enabledTargets.filter((target) => target.transport === 'relay')
   if (relayTargets.length > 0) {
@@ -100,6 +103,7 @@ export async function apply(ctx, rawConfig) {
       persist: createPersist(ctx, log),
       unroute: () => restoreProviderRoutes(ctx, { cfg, log }),
       route: () => ensureProviderRoutes(ctx, { cfg, log }),
+      integrity,
     })
     try {
       await new Promise((resolve, reject) => {

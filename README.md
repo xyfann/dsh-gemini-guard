@@ -68,6 +68,26 @@ Settings page renders the full form; linked from a directory it degrades to
 `reachabilityProbe`, `riskRules`, `headerNormalize`, `promptContext`,
 `burstLimit`, `streamWatch`, `autoRoute`.
 
+## 三份代码 diff：DSH 跑的到底是不是你推的那份
+
+```
+GET  /_gemini-guard/diff?target=dsh-gemini-guard        # 有 60s 缓存
+GET  /_gemini-guard/diff?target=<包名>&refresh=1        # 强制重查
+```
+
+三处副本逐文件比内容哈希：工作区源码、GitHub 仓库、profile 里已安装的副本。
+
+| verdict | 含义 |
+|---|---|
+| `identical` | 三份完全一样（文件集合与内容） |
+| `content-identical` | 内容一致，只是工作区多了 `test/` 这类不会装进 DSH 的文件 |
+| `drift` | 有文件内容不同，或安装副本多出源码里没有的文件 |
+| `unknown` | 有一份没读到（例如远端不可达），只报能比的部分 |
+
+每个差异带 `status`：`workspace-ahead`（改了没提交/没推）、`installed-stale`（需要重装）、`github-stale`、`only-installed`（可疑）、`missing-installed` 等。
+
+位置不用配：工作区按 `DSH_WORKSPACE` → `$DSH_HOME/storages/workspace.json` → `~/dsh-workspace` → 当前目录依次找；安装副本按 `DSH_PROFILE_DIR/node_modules` → `$DSH_HOME/profiles/*/node_modules` 找；仓库地址取 `package.json` 的 `repository`，没有就取 `git remote origin`。GitHub 侧只做一次浅 fetch 到临时裸库读 blob sha，不下载仓库、不改你的 `.git`；`?repo=` 可临时指定别的仓库。
+
 ## Tests
 
 ```sh

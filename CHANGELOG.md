@@ -2,6 +2,17 @@
 
 本项目的版本记录。版本号遵循语义化版本：`MAJOR.MINOR.PATCH`，预发布用 `-beta.N`。
 
+## 0.3.4-beta.1 — 2026-11-20
+
+### 新增
+
+- **三份代码 diff（`GET /_gemini-guard/diff`）**：同一份插件的三处副本——工作区源码、GitHub 仓库、profile 里已安装的副本——逐文件比内容哈希，回答"DSH 现在跑的到底是不是我改/我推的那份"。默认比本插件自己，`?target=` 可查任意已安装插件。
+- 判定四档：`identical`（三份完全一样）、`content-identical`（内容一致，只是工作区多了 `test/` 这类不会装进 DSH 的文件）、`drift`（有内容不同，或安装副本多出源码里没有的文件）、`unknown`（有一份没读到）。
+- 行尾不误报：工作区交给 `git hash-object` 按提交时的过滤器算哈希，安装副本额外算一份 CRLF→LF 的规范化哈希，只在行尾不同按同一份内容处理。
+- 位置零配置：工作区按 `DSH_WORKSPACE` → `$DSH_HOME/storages/workspace.json` → `~/dsh-workspace` → 当前目录找；安装副本按 `DSH_PROFILE_DIR/node_modules` → `$DSH_HOME/profiles/*/node_modules` 找；仓库地址取 `package.json` 的 `repository`，没有就取 `git remote origin`。
+- GitHub 侧只做一次浅 fetch 到临时裸库、读 tree 里的 blob sha，不下载仓库、不改用户的 `.git`。
+- `test/diff.mjs`：离线覆盖六种情形——基线、安装副本被改、安装副本多出文件、工作区未提交、推送重装后回到一致、远端不可达。
+
 ## 0.3.3-beta.1 — 2026-11-20
 
 ### 修复
