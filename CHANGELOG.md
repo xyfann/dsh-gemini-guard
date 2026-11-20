@@ -40,3 +40,4 @@
 - 无法改变出口 IP：地区判定读的是连接源 IP，插件只能让出口"固定、可验证、不跳动"。
 - 机房 IP 可能被厂商拒绝，与插件无关。
 - 账号国家/结算地不在本插件的能力范围内。
+- **首次安装后需重启一次 DSH**：HMR 热加载激活处于 loader 事务内，`configEditor` 的写入会被拒绝（`HMR transactions cannot be nested`），provider 路由只能在正常 boot 时写入。详见 `docs/RELEASE.md` 第 6 节。

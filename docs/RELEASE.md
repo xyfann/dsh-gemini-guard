@@ -80,6 +80,20 @@ plugin_manager install_bundle  target = github:xyfann/dsh-gemini-guard
 - 返回 `restart-required` = **文件已换新，但进程还在跑旧模块**，必须重启 DSH 才会加载新代码；
 - 返回 `failed` = 保留诊断，先修环境（例如 runtime 里 pnpm 路径缺失）再重试。
 
+同一个 target 已安装时，管理器会返回 `already-installed`；按它的提示先 `remove_bundle`，再 `install_bundle`。
+
+### 安装方式决定一件事：路由改写要等重启
+
+`llm-pi-ai` 的 provider 路由由插件通过 `configEditor` 写入。而 **HMR 激活**（安装后被热加载进正在运行的进程）处在一个 loader 事务内，嵌套的配置写入会被拒绝：
+
+```
+HMR transactions cannot be nested
+```
+
+这不是竞态，是事务边界：只要插件是"被热加载"的，它就写不了配置。因此**首次安装后需要重启一次 DSH**；重启后插件按正常 boot 激活，事务不存在，第 7 步的 `google` 路由会自己出现。之后每次改配置都不用再重启（面板保存走的是运行时路径）。
+
+判断依据：`status.recent` 里出现这条 warn，且 profile patch 里没有 `google:` 段。
+
 ## 7. 验证（三层，缺一不可）
 
 | 层 | 怎么看 | 通过标准 |
