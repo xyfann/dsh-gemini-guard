@@ -99,13 +99,14 @@ export class GeoGuard {
       breaker: freshBreaker(),
       counters: freshCounters(),
       upstreamCooldownUntil: 0,
+      models: new Map(),
     }]))
   }
 
   #state(targetId) {
     let state = this.targetState.get(targetId)
     if (!state) {
-      state = { breaker: freshBreaker(), counters: freshCounters(), upstreamCooldownUntil: 0 }
+      state = { breaker: freshBreaker(), counters: freshCounters(), upstreamCooldownUntil: 0, models: new Map() }
       this.targetState.set(targetId, state)
     }
     return state
@@ -301,7 +302,7 @@ export class GeoGuard {
   }
 
   /** Decide whether one model request for `targetId` may proceed. */
-  async admit(targetId) {
+  async admit(targetId, model = '') {
     const target = this.cfg.targets[targetId]
     if (!target || !target.enabled) return { ok: true, skipped: true }
     const state = this.#state(targetId)
@@ -313,6 +314,24 @@ export class GeoGuard {
     }
 
     const now = Date.now()
+    // Model-level health first: a saturated model is a deployment problem, not a
+    // route problem, so switching models must remain possible right away.
+    if (model !== '') {
+      const health = state.models.get(model)
+      if (health && health.until > now) {
+        state.counters.blocked += 1
+        const healthy = [...state.models.entries()]
+          .filter(([, entry]) => entry.until <= now)
+          .map(([id]) => id)
+        return {
+          ok: false,
+          reason: 'model-cooling',
+          model,
+          detail: `型号 ${model} 冷却中（${health.lastKind}），还剩 ${Math.ceil((health.until - now) / 1000)} 秒`
+            + (healthy.length > 0 ? `；当前可用：${healthy.join(', ')}` : '；可在面板里复位或换型号'),
+        }
+      }
+    }
     if (state.upstreamCooldownUntil > now) {
       state.counters.blocked += 1
       return {
@@ -359,7 +378,7 @@ export class GeoGuard {
   async admitByRoute(route) {
     const target = targetForRoute(this.cfg, route)
     if (!target) return { ok: true, skipped: true }
-    return this.admit(target.id)
+    return this.admit(target.id, model)
   }
 
   /** Feed one request outcome back into that target's breaker. */
@@ -367,7 +386,7 @@ export class GeoGuard {
     const target = this.cfg.targets[targetId]
     if (!target) return
     const state = this.#state(targetId)
-    const { kind, detail = '', status = 0, retryAfterMs = 0 } = outcome
+    const { kind, detail = '', status = 0, retryAfterMs = 0, model = '' } = outcome
     const now = Date.now()
 
     switch (kind) {
@@ -405,8 +424,18 @@ export class GeoGuard {
 
       case 'overloaded':
         state.counters.upstreamErrors += 1
-        state.upstreamCooldownUntil = now + Math.max(retryAfterMs, 15000)
-        this.log.warn(`${target.id} 上游过载，短暂冷却`, detail)
+        if (model !== '') {
+          // Per-deployment ejection (LiteLLM cools a deployment, Envoy ejects a
+          // host): the route stays usable through its other models.
+          state.models.set(model, {
+            until: now + Math.max(retryAfterMs, this.cfg.breaker.modelCooldownMs),
+            lastKind: 'overloaded',
+          })
+          this.log.warn(`${target.id} 型号 ${model} 高负载，单独冷却 ${Math.round(this.cfg.breaker.modelCooldownMs / 1000)} 秒`, detail)
+        } else {
+          state.upstreamCooldownUntil = now + Math.max(retryAfterMs, 2000)
+          this.log.warn(`${target.id} 厂商高负载（换型号或稍后再试）`, detail)
+        }
         return
 
       case 'server':
@@ -452,6 +481,7 @@ export class GeoGuard {
       const state = this.#state(id)
       state.breaker = freshBreaker()
       state.upstreamCooldownUntil = 0
+      state.models.clear()
     }
     this.egressCache = null
     this.log.info('开关变更，已清除熔断与探测缓存')
@@ -464,6 +494,7 @@ export class GeoGuard {
       const state = this.#state(id)
       state.breaker = freshBreaker()
       state.upstreamCooldownUntil = 0
+      state.models.clear()
     }
     this.egressCache = null
     this.confirm = { ip: '', count: 1 }
@@ -497,6 +528,13 @@ export class GeoGuard {
           openedAt: state.breaker.openedAt === 0 ? null : new Date(state.breaker.openedAt).toISOString(),
         },
         upstreamCooldownUntil: state.upstreamCooldownUntil === 0 ? null : new Date(state.upstreamCooldownUntil).toISOString(),
+        // Only models currently ejected are listed; an empty object means the
+        // whole route is usable.
+        models: Object.fromEntries(
+          [...state.models.entries()]
+            .filter(([, health]) => health.until > Date.now())
+            .map(([id, health]) => [id, { until: new Date(health.until).toISOString(), lastKind: health.lastKind }]),
+        ),
         counters: state.counters,
       }
     }
@@ -555,6 +593,7 @@ export function guardError(cfg, targetId, admission) {
     'timezone-mismatch': '出口时区与本机声明不一致（策略拒绝）',
     'awaiting-confirmation': '出口尚未被连续探测确认',
     'upstream-cooldown': '上游要求冷却',
+    'model-cooling': '该型号高负载冷却中（换一个型号即可）',
     'breaker-open': '出口不稳定，熔断冷却中',
     'hard-stopped': '已被硬停，等待人工复位',
     disabled: '插件已停用',

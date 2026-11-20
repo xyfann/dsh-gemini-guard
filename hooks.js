@@ -18,7 +18,7 @@ export function registerLlmStreamGuard(ctx, { cfg, guard, log }) {
       yield* next()
       return
     }
-    const admission = await guard.admit(target.id)
+    const admission = await guard.admit(target.id, options?.model ?? '')
     if (!admission.ok) {
       log.warn('拦截模型调用', `${target.id} ${admission.reason}: ${admission.detail ?? ''}`)
       throw guardError(cfg, target.id, admission)

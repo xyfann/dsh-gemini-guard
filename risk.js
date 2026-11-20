@@ -130,7 +130,16 @@ const RATE_PATTERNS = [
   /try again later/i,
 ]
 
-const OVERLOADED_PATTERNS = [/overloaded/i, /server[_ ]overloaded/i, /capacity/i]
+// Capacity, not quota and not rate limiting: one model being saturated says
+// nothing about the others on the same route, so it must not cool the route down.
+const OVERLOAD_PATTERNS = [
+  /experiencing high demand/i,
+  /high demand/i,
+  /spikes? in demand/i,
+  /temporarily unavailable/i,
+  /overloaded/i,
+  /server[_ ]overloaded/i,
+]
 
 function matches(patterns, text) {
   return patterns.some((pattern) => pattern.test(text))
@@ -150,11 +159,17 @@ export function classifyUpstreamError(status, text, headers = {}) {
   if (matches(QUOTA_PATTERNS, text)) {
     return { kind: 'quota', detail: text.slice(0, 240), retryAfterMs }
   }
-  if (status === 429 || matches(RATE_PATTERNS, text)) {
+  if (status === 429) {
     return { kind: 'rate-limit', detail: text.slice(0, 240), retryAfterMs }
   }
-  if (matches(OVERLOADED_PATTERNS, text)) {
+  // Check capacity before the rate-limit wording: a saturation body usually ends
+  // with "please try again later", which would otherwise be read as a rate limit
+  // and cool the whole route down for one busy model.
+  if (matches(OVERLOAD_PATTERNS, text)) {
     return { kind: 'overloaded', detail: text.slice(0, 240), retryAfterMs }
+  }
+  if (matches(RATE_PATTERNS, text)) {
+    return { kind: 'rate-limit', detail: text.slice(0, 240), retryAfterMs }
   }
   if (status === 401 || status === 403 || matches(AUTH_PATTERNS, text)) {
     return { kind: 'auth', detail: text.slice(0, 240), retryAfterMs }

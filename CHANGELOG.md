@@ -13,6 +13,22 @@
 - GitHub 侧只做一次浅 fetch 到临时裸库、读 tree 里的 blob sha，不下载仓库、不改用户的 `.git`。
 - `test/diff.mjs`：离线覆盖六种情形——基线、安装副本被改、安装副本多出文件、工作区未提交、推送重装后回到一致、远端不可达。
 
+## 0.5.0-beta.1 — 2026-11-20
+
+### 变更（架构对齐主流网关）
+
+按 LiteLLM（cooldown 按 **deployment** 而非 provider）、New-API（渠道级健康自动禁用/恢复）、Envoy（`consecutive_5xx` 逐出 + `base_ejection_time`）的共同做法，把健康度从"按厂商"细化为"**按型号**"：
+
+- **型号级冷却**：某个型号返回容量类错误（`503 high demand` 等）时，只冷却**该型号**（`breaker.modelCooldownMs`，默认 20 秒），同路由的其它型号立刻可用。此前一条 503 会把整个 `google` 路由锁 30 秒，导致"换型号也没用"。
+- **只对真正的限流/配额做路由级冷却**：`429` → 路由冷却 30 秒；`quota` → 路由冷却 10 分钟；`503/高负载` 降级为型号级。
+- **分类顺序修正**：容量类文案通常以 "please try again later" 结尾，之前会被 `rate-limit` 规则先命中。现在 `429` → 限流、`high demand/spikes in demand/temporarily unavailable/overloaded` → `overloaded`，再轮到通用限流词。
+- **可解释的拒绝**：被冷却的型号会返回 `model-cooling`，消息里点名型号、剩余秒数，并列出当前可用的型号。
+- **`/status`**：`targets.<id>.models` 列出正在冷却的型号；面板顶部显示「冷却 <型号>」标签。
+
+### 新增
+
+- `test/model-health.mjs`：型号级冷却只影响该型号、`429` 冷却整条路由、`quota` 同理、`reset` 两层都清。
+
 ## 0.4.3-beta.1 — 2026-11-20
 
 ### 修复（"一直等待"的真因）

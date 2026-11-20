@@ -149,6 +149,9 @@ export const DEFAULTS = {
     cooldownMs: 120000,
     hardStopCooldownMs: 3600000,
     hardStop: true,
+    // Capacity failures are per model (LiteLLM cools a deployment, Envoy ejects a
+    // host): one saturated model must not block its siblings on the same route.
+    modelCooldownMs: 20000,
   },
 
   environment: {
@@ -339,6 +342,7 @@ export function resolveConfig(raw, { harnessHome } = {}) {
   cfg.breaker.cooldownMs = int(cfg.breaker.cooldownMs, 'breaker.cooldownMs', problems, 1000, 86400000)
   cfg.breaker.hardStopCooldownMs = int(cfg.breaker.hardStopCooldownMs, 'breaker.hardStopCooldownMs', problems, 1000, 604800000)
   cfg.breaker.hardStop = bool(cfg.breaker.hardStop, 'breaker.hardStop', problems)
+  cfg.breaker.modelCooldownMs = int(cfg.breaker.modelCooldownMs, 'breaker.modelCooldownMs', problems, 1000, 600000)
 
   cfg.environment.region = str(cfg.environment.region, 'environment.region', problems)
   cfg.environment.timeZone = str(cfg.environment.timeZone, 'environment.timeZone', problems)

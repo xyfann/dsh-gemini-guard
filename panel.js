@@ -234,6 +234,11 @@ function render(status) {
     var id = keys[i]; var b = t[id].breaker;
     var cls = b.state === 'open' ? 'bad' : 'ok';
     chips.push(chip(id + ' ' + b.state + (b.reason ? '/' + b.reason : ''), cls));
+    var cooling = t[id].models || {};
+    var coolingIds = Object.keys(cooling);
+    for (var c = 0; c < coolingIds.length; c++) {
+      chips.push(chip('冷却 ' + coolingIds[c], 'warn'));
+    }
   }
   document.getElementById('chips').innerHTML = chips.join('');
   document.getElementById('dump').textContent = JSON.stringify(status, null, 2);

@@ -90,6 +90,11 @@ function decodeBody(response) {
   }
 }
 
+function modelFromPath(requestPath) {
+  const match = /\/models\/([^:/?]+)/.exec(requestPath)
+  return match === null ? '' : decodeURIComponent(match[1])
+}
+
 function isStreamingRequest(requestPath, contentType) {
   return /streamGenerateContent|alt=sse|stream=true|:stream/i.test(requestPath)
     || String(contentType ?? '').includes('text/event-stream')
@@ -197,9 +202,9 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
       return
     }
 
-    const admission = await guard.admit(target.id)
-    if (!admission.ok) {
-      log.warn('拦截请求', `${target.id} ${req.method} ${url} -> ${admission.reason}`)
+    const model = modelFromPath(url.slice(target.pathPrefix.length))
+    const admission = await guard.admit(target.id, model)
+    if (!admission.ok) {      log.warn('拦截请求', `${target.id} ${req.method} ${url} -> ${admission.reason}`)
       // Drain any body so the client reads our 403 instead of a reset.
       req.resume()
       writeGuardRejection(cfg, target, res, admission)
@@ -344,6 +349,9 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
     const chunks = []
     let bytes = 0
     let tooLarge = false
+    // Which model this request is for; capacity failures are recorded against it
+    // so one saturated model does not cool the whole route.
+    const model = modelFromPath(requestPath)
 
     // One place owns the concurrency slot and the upstream request so a client
     // that disconnects *before* the tunnel is built cannot strand the slot. That
@@ -418,7 +426,7 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
         })
       } catch (error) {
         releaseSlot()
-        guard.recordOutcome(target.id, { kind: 'transport', detail: `建立出口连接失败：${error.message}` })
+        guard.recordOutcome(target.id, { model, kind: 'transport', detail: `建立出口连接失败：${error.message}` })
         writeJson(res, 502, {
           error: { code: 502, message: `[dsh-gemini-guard] 无法建立到 ${target.upstreamHost} 的出口连接：${error.message}`, status: 'UNAVAILABLE' },
         }, { 'x-gemini-guard': 'egress-unreachable' })
@@ -456,7 +464,7 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
           return
         }
         if (responded) {
-          guard.recordOutcome(target.id, { kind: 'late-abort', detail: `响应中断：${error.message}` })
+          guard.recordOutcome(target.id, { model, kind: 'late-abort', detail: `响应中断：${error.message}` })
           res.destroy(error)
           return
         }
@@ -466,7 +474,7 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
           }, { 'x-gemini-guard': 'first-byte-timeout' })
           return
         }
-        guard.recordOutcome(target.id, { kind: 'transport', detail: `上游请求失败：${error.message}` })
+        guard.recordOutcome(target.id, { model, kind: 'transport', detail: `上游请求失败：${error.message}` })
         writeJson(res, 502, {
           error: { code: 502, message: `[dsh-gemini-guard] 上游请求失败：${error.message}`, status: 'UNAVAILABLE' },
         }, { 'x-gemini-guard': 'upstream-error' })
@@ -501,6 +509,7 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
             const verdict = classifyUpstreamError(status, text, upstreamResponse.headers)
             if (verdict.kind !== 'client') {
               guard.recordOutcome(target.id, {
+                model,
                 kind: verdict.kind,
                 detail: `${target.id} HTTP ${status}: ${verdict.detail}`,
                 status,
@@ -518,7 +527,7 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
           stream.on('error', (error) => {
             releaseSlot()
             if (state.clientGone) return
-            guard.recordOutcome(target.id, { kind: 'late-abort', detail: `读取上游错误响应失败：${error.message}` })
+            guard.recordOutcome(target.id, { model, kind: 'late-abort', detail: `读取上游错误响应失败：${error.message}` })
             res.destroy(error)
           })
           return
@@ -538,21 +547,21 @@ export function createRelayServer({ cfg, guard, log, persist, unroute, route, in
         stream.on('end', () => {
           releaseSlot()
           if (streaming && !complete) {
-            guard.recordOutcome(target.id, { kind: 'late-abort', detail: `流在无结束标记的情况下关闭：${target.id} ${requestPath}` })
+            guard.recordOutcome(target.id, { model, kind: 'late-abort', detail: `流在无结束标记的情况下关闭：${target.id} ${requestPath}` })
           } else if (!state.clientGone) {
-            guard.recordOutcome(target.id, { kind: 'ok' })
+            guard.recordOutcome(target.id, { model, kind: 'ok' })
           }
           if (!res.writableEnded) res.end()
         })
         stream.on('error', (error) => {
           releaseSlot()
           if (state.clientGone) return
-          guard.recordOutcome(target.id, { kind: 'late-abort', detail: `响应流错误：${error.message}` })
+          guard.recordOutcome(target.id, { model, kind: 'late-abort', detail: `响应流错误：${error.message}` })
           if (!res.writableEnded) res.destroy(error)
         })
         upstreamResponse.on('aborted', () => {
           if (state.clientGone) return
-          guard.recordOutcome(target.id, { kind: 'late-abort', detail: '上游在响应中途断开（aborted）' })
+          guard.recordOutcome(target.id, { model, kind: 'late-abort', detail: '上游在响应中途断开（aborted）' })
         })
         stream.pipe(res)
       })

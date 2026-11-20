@@ -96,6 +96,8 @@ const cases = [
   ['anthropic overloaded', 529, '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}', 'overloaded'],
   ['openai quota', 429, '{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}', 'quota'],
   ['gemini 500', 500, '{"error":{"message":"Internal error"}}', 'server'],
+  ['gemini 503 high demand', 503, '{"error":{"code":503,"message":"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."}}', 'overloaded'],
+  ['generic overloaded wording', 503, '{"error":{"message":"The service is temporarily unavailable"}}', 'overloaded'],
   ['gemini bad request', 400, '{"error":{"message":"Invalid JSON payload received"}}', 'client'],
 ]
 

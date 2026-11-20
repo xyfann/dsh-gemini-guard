@@ -136,6 +136,8 @@ function buildSchema(Schema) {
         .description('硬停冷却（毫秒），地区被拒时使用。'),
       hardStop: Schema.boolean().default(breaker.hardStop)
         .description('地区被拒是否闩死到人工复位。'),
+      modelCooldownMs: Schema.number().default(breaker.modelCooldownMs)
+        .description('单个型号高负载时的冷却（毫秒）。只影响该型号，同路由的其它型号照常可用。'),
     }).description('熔断器。'),
 
     listenHost: Schema.string().default(DEFAULTS.listenHost)
