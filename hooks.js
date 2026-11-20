@@ -220,6 +220,13 @@ export async function ensureProviderRoutes(ctx, { cfg, log }) {
             apiKeyEnv: existing.apiKeyEnv ?? target.apiKeyRef,
             baseURL: target.relayBaseUrl,
           }
+          // `models: []` replaces the installed catalog wholesale, so the route
+          // ends up advertising nothing. An empty list is never what a user
+          // means after filling in a key: drop it and let the catalog apply.
+          if (Array.isArray(candidate.models) && candidate.models.length === 0) {
+            delete candidate.models
+            log.info(`${target.route} 的 models 列表为空（会隐藏全部模型），已移除该字段以恢复内置目录`)
+          }
           if (JSON.stringify(candidate) === JSON.stringify(existing)) continue
           providers[target.route] = candidate
           written.push(target.route)
